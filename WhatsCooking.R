@@ -11,39 +11,10 @@ trainSet <- read_file("train.json") |>
 testSet <- read_file("test.json") |>
   fromJSON()
 
-trainSet <- trainSet |>
-  unnest(ingredients)
-testSet <- testSet |>
-  unnest(ingredients)
-
-
-trainSet <- trainSet |> 
-  mutate(
-    # 1. Ingredient count
-    n_ingredients = map_int(ingredients, length),
-    
-    # 3. Category indicators
-    has_turmeric = map_lgl(ingredients, ~ any(str_detect(.x, "turmeric"))),
-    has_soy      = map_lgl(ingredients, ~ any(str_detect(.x, "soy"))),
-    has_cumin    = map_lgl(ingredients, ~ any(str_detect(.x, "cumin")))
-  )
-
-# --- Full RECIPE ---
-
-recipe <- recipe(cuisine ~ ingredients + n_ingredients + 
-         has_turmeric + has_soy + has_cumin,
-       data = trainSet) |>
-  
-  ## Unnest ingredient list into tokens
-  step_tokenize(ingredients) |> 
-  
-  ## Remove stopwords like "fresh", "ground", etc.
-  step_stopwords(ingredients) |>
-  
-  ## Filter vocabulary to top words (helps speed)
-  step_tokenfilter(ingredients, max_tokens = 2000) |>
-  
-  ## Create TF-IDF features
+## Define TF-IDF9
+rec <- recipe(cuisine ~ ingredients, data = trainSet) |>
+  step_mutate(ingredients = tokenlist(ingredients)) |>
+  step_tokenfilter(ingredients, max_tokens=500) |>
   step_tfidf(ingredients)
 
 rf_spec <- rand_forest(
@@ -56,6 +27,14 @@ rf_spec <- rand_forest(
 
 rf_workflow <- workflow() |>
   add_model(rf_spec) |>
-  add_recipe(recipe)
+  add_recipe(rec)
 
 rf_fit <- rf_workflow |> fit(data = trainSet)
+
+test_predictions <- predict(rf_fit, testSet) |>
+  bind_cols(testSet)
+
+submission <- test_predictions |>
+  select(id, cuisine = .pred_class)
+
+write_csv(submission, "submission.csv")
